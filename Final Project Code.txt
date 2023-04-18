@@ -1,0 +1,279 @@
+
+#include <hidef.h>      /* common defines and macros */
+#include "derivative.h"      /* derivative-specific definitions */
+
+int a = 0,b=0,c=0; // counter overflow for channel0, channel1,channel2
+unsigned int t1,t2,tdelta,D1=0,D2=0,D3=0; // t1 is start time, t2 end time , tdelta = t2 -t1 , D1 is distance1 and so on
+void Calculate_Distance1(void); // calculates distance for front sensor (sensor1)
+void TIE_init(void);        // to initialise enabling the timer hardware interruppts
+void Calculate_Distance2(void); // calculates distance for left sensor (sensor2)   
+void Calculate_Distance3(void); // calculates distance for right sensor (sensor3)
+void microDelay(unsigned int);  // delay function in microseconds
+
+void delay(unsigned int);       // delay function used for motors
+void forward(void);             // move forward
+void backward(void);            // move backward
+void left(void);                // move left
+void right(void);               // move right
+void stop(void);                // stop moving
+int dutycycle = 35;             // duty cycle of the motor 
+
+
+void interrupt 8 handler1()  //handles the interrupt of channel 0 timer to set the values of t1 and t2
+{
+    
+    if(a== 0) {
+      while(!(TFLG1 & TFLG1_C0F_MASK));
+      t1 = TC0;
+      a+=1;
+      } 
+    else {
+      while(!(TFLG1 & TFLG1_C0F_MASK));
+      t2 = TC0;
+      tdelta = t2 -t1;
+      D1 = 17* tdelta /1000;
+      a =0;
+    }
+}
+void interrupt 9 handler2() //handles the interrupt of channel 1 timer to set the values of t1 and t2
+{
+    if(b== 0) {
+      while(!(TFLG1 & TFLG1_C1F_MASK));
+      t1 = TC1;
+      b+=1;
+      } 
+    else {
+      while(!(TFLG1 & TFLG1_C1F_MASK));
+      t2 = TC1;
+      tdelta = t2 -t1;
+      D2 = 17* tdelta /1000;
+      b =0;
+    }
+  }
+  void interrupt 10 handler3() //handles the interrupt of channel 2 timer to set the values of t1 and t2
+{
+    
+    if(c== 0) {
+      while(!(TFLG1 & TFLG1_C2F_MASK));
+    
+      
+      t1 = TC2;
+      
+      c+=1;
+      } 
+    else {
+      while(!(TFLG1 & TFLG1_C2F_MASK));
+      t2 = TC2;
+      tdelta = t2 -t1;
+      D3 = 17* tdelta /1000;
+      c =0;
+    }
+  
+}
+
+ 
+void main(void) {
+  TSCR1 = 0x00; //Timer Disabled Initially
+  TSCR2 = 0x02; //Timer overflow interrupt Disabled, Prescaler = 4
+  TCTL4 = 0x3F;
+  DDRA_BIT0 = 1;//Trigger Pin is set to output on port A bit0
+  DDRA_BIT1 = 1;//Trigger Pin is set to output on port A bit1
+  DDRA_BIT2 = 1;//Trigger Pin is set to output on port A bit2
+  //DDRB = 0xFF; //LED on Pin B0,B1,B2 output
+  TIOS = TIOS & ~0x07; // Set Pin T0 as input for the echo pin
+   // enable hardware interrupt on channel 0
+  PORTA_BIT0 = 0; // Set Pin A0 initially to low
+  PORTA_BIT1 = 0; // Set Pin A1 initially to low
+  PORTA_BIT2 = 0; // Set Pin A2 initially to low
+  
+  
+  DDRP_DDRP0 = 1;  //Channel 0 Enable port set to output
+  DDRP_DDRP1 = 1;  //Channel 1 Enable port set to output
+  
+  DDRB_BIT0 = 1;      //PORTB pins 0-3 set as output since motors are controlled by ports...
+  DDRB_BIT1 = 1;      //...(First motor: PB0, PB1) (Second motor: PB2,PB3)
+  DDRB_BIT2 = 1; 
+  DDRB_BIT3 = 1;
+  
+   
+  
+  PORTB_BIT0 = 0;     //Initially stop all DC motors(PB0=0,PB1=0, PB2=0 and PB3=0).
+  PORTB_BIT1 = 0;     
+  PORTB_BIT2 = 0;     
+  PORTB_BIT3 = 0;                  
+    
+  PWMPRCLK = 0x02; 	//ClockA = Eclock/(2^x) = 4 MHz/4 = 1MHz <-- this is our ClockA frequency
+	PWMCLK = 0x00; 	  //Enable ClockA for Channel 0 (M1) and Channel 1 (M2)
+	PWMPOL = 0x03; 	  //enable positive polarity for channel 1 and channel 2 
+	PWMCAE = 0x00; 		  //enable left alignment for channel 1 and channel 2 
+	PWMCTL = 0x00;		   //8-bit chan and PWM freeze during wait  
+	PWMCNT0 = 0;		 //initilaize the PWMCount with 0 
+	PWMCNT1 = 0;
+	
+	PWMPER0 = 100;	  //PWM_Period Freq. = ClockA/100= 1 MHz/100= 10 kHz
+	PWMPER1 = 100;
+  PWMDTY0 = dutycycle;     //Duty Cycle 
+  PWMDTY1 = dutycycle + 13;
+	PWME = 0x03; 	   //Enable PWM chan 0, PWM chan 1
+  
+  TIE_init();
+  __asm CLI;    //enable interrupts globally
+  stop();
+  for(;;) {
+    Calculate_Distance1();
+    Calculate_Distance2();
+    Calculate_Distance3();
+
+    if(D1 < 10) {//something infront of it
+                    stop();
+                    delay(2000);
+
+                    if(D2 < 10) {// something infront of it & cant go left
+                                 
+
+                                  if(D3 < 10) {// something infront of it & cant go left or right
+                                                backward();
+                                                delay(500);
+                                                left(); // left 90 deg
+                                                delay(1000);
+                                                //left(); //left 90 deg
+                                                //delay(18);
+                                                forward();
+                                               }
+                                               else { // something infront of it & cant go left but can go right
+                                               backward();
+                                               delay(500);
+                                               stop();
+                                               right();
+                                               delay(1000);
+                                               stop();
+                                               //delay till its 90 deg
+
+                                               forward();
+                                               //delay till it moves for 11inches
+                                               //delay till its 90 deg
+                                             }
+                                 }
+                    else  {// something infront of it but can go left
+                    backward();
+                    delay(500);
+                    stop();
+                    left();
+                    delay(1000);
+                    stop();
+                    forward();
+                    //delay till its 90 deg
+                    //forward();
+                    //delay till it moves for 11inches
+                    //delay(4000);
+                    //left();
+                    //delay(18);
+                    //delay till its 90 deg
+                               }
+                 }
+    else {
+     forward();
+
+    }
+
+  }
+
+
+}
+
+void Calculate_Distance1(void) {
+  PORTA_BIT0 = 1; //Set trigger to high
+  microDelay(10);
+  PORTA_BIT0 = 0; //Set trigger to low
+  TSCR1 = 0x00; //Timer Disabled
+  TSCR1 = 0x90; //Enable timer now,  used to reset the TCNT timer to 0, CPU clears the flag
+  microDelay(30000);
+
+}
+void Calculate_Distance2(void){
+  PORTA_BIT1 = 1; //Set trigger to high
+  microDelay(10);
+  PORTA_BIT1 = 0; //Set trigger to low
+  TSCR1 = 0x00; //Timer Disabled
+  TSCR1 = 0x90; //Enable timer now,  used to reset the TCNT timer to 0, CPU clears the flag
+  microDelay(30000);
+
+}
+void Calculate_Distance3(void){
+  PORTA_BIT2 = 1; //Set trigger to high
+  microDelay(10);
+  PORTA_BIT2 = 0; //Set trigger to low
+  TSCR1 = 0x00; //Timer Disabled
+  TSCR1 = 0x90; //Enable timer now,  used to reset the TCNT timer to 0, CPU clears the flag
+  microDelay(30000);
+}
+
+void TIE_init(void) {
+  TIE = 0x07;   
+}
+void microDelay(unsigned int num)
+{
+    unsigned int i, j;
+    unsigned int num_cycles = (num * 8); // 8 MHz clock frequency
+
+    for(i=0; i<num_cycles; i++)
+    {
+        for(j=0; j<10; j++); // 10 iterations per cycle (8 MHz / 10 = 0.8 MHz)
+    }
+}
+
+
+
+void forward(void){
+
+  PORTB_BIT0=1; //changes direction to CW 
+  PORTB_BIT1=0; 
+  PORTB_BIT2=1; 
+  PORTB_BIT3=0;
+
+}
+
+
+void backward(void){
+
+  PORTB_BIT0=0; //changes direction to CCW 
+  PORTB_BIT1=1;
+  PORTB_BIT2=0; 
+  PORTB_BIT3=1;
+  
+}
+
+void left(void){
+
+  PORTB_BIT0=1; 
+  PORTB_BIT1=0;
+  PORTB_BIT2=0; 
+  PORTB_BIT3=1;
+  
+}
+
+void right(void){
+
+  PORTB_BIT0=0; 
+  PORTB_BIT1=1;
+  PORTB_BIT2=1; 
+  PORTB_BIT3=0;
+  
+}
+
+void stop(void){
+
+  PORTB_BIT0=0; //stop the motor
+  PORTB_BIT1=0; 
+  PORTB_BIT2=0; 
+  PORTB_BIT3=0; 
+  
+}
+
+
+void delay(unsigned int num)
+  {
+    unsigned int i; unsigned int j;
+    for(i=0;i<num;i++)
+      for(j=0;j<667;j++);    
+  }
